@@ -1,0 +1,4 @@
+streamlit
+rank_bm25
+requests
+beautifulsoup4

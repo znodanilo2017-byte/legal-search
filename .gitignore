@@ -1,0 +1,7 @@
+data/
+*app_old.py
+
+venv/
+.venv/
+__pycache__/
+.DS_Store
