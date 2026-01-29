@@ -99,8 +99,9 @@ except Exception as e:
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("🇺🇦 Legal Assistant")
-    st.caption("Mode: Offline / Secure")
-    num_results = st.slider("Results", 1, 10, 5)
+    st.info(f"📚 Indexed: **{len(articles)} articles**")
+    st.caption("Sources: Rada.gov.ua")
+    num_results = st.slider("Results", 1, 10, 6)
 
 # --- MAIN UI ---
 st.title("Швидкий пошук")
@@ -152,6 +153,11 @@ if user_query:
                 </a>
                 <div class="snippet">
                     {highlighted_preview}
+                </div>
+                <div style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 5px; text-align: right;">
+                    <a href="{art.get('url')}" target="_blank" style="color: #006621; font-size: 0.8em; text-decoration: none;">
+                        🔗 Перейти на Zakon.Rada.gov.ua ↗
+                    </a>
                 </div>
             </div>
             """, unsafe_allow_html=True)
