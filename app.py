@@ -62,7 +62,8 @@ def load_engine():
         "civil_procedure_code_parsed.json", 
         "family_code_parsed.json",
         "mobilization_parsed.json",
-        "intelectual_property_parsed.json"
+        "intellectual_property_parsed.json",
+        "medical_parsed.json"
     ]
     all_articles = []
     
@@ -75,6 +76,7 @@ def load_engine():
                 elif "family" in filepath: tag = "СКУ • Сімейний кодекс"
                 elif "mobilization" in filepath: tag = "ЗУ • Мобілізація"
                 elif "intelectual_property" in filepath: tag = "ЗУ • Інтелектуальна власність"
+                elif "medical" in filepath: tag = "🏥 МСЕК • Інвалідність"
                 else: tag = "Закон"
                 
                 for doc in data:
