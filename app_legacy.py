@@ -7,7 +7,7 @@ from rank_bm25 import BM25Okapi
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Legal Assistant", page_icon="🇺🇦", layout="centered")
 
-# --- CUSTOM CSS ---
+# --- CUSTOM CSS (Google-Style Clean) ---
 st.markdown("""
     <style>
     .result-card {
@@ -17,20 +17,28 @@ st.markdown("""
         margin-bottom: 12px;
         border: 1px solid #e1e4e8;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        transition: box-shadow 0.2s;
     }
-    .meta-row {
-        font-size: 0.85em;
-        color: #006621;
-        margin-bottom: 8px;
-        font-weight: 500;
+    .result-card:hover {
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        border-color: #d1d5da;
     }
     .article-title {
-        color: #1a73e8;
+        color: #1a73e8; /* Google Blue */
         font-size: 1.2em;
         font-weight: 600;
         text-decoration: none;
         display: block;
+        margin-bottom: 4px;
+    }
+    .article-title:hover {
+        text-decoration: underline;
+    }
+    .meta-row {
+        font-size: 0.85em;
+        color: #006621; /* Google Green for URL/Source */
         margin-bottom: 8px;
+        font-weight: 500;
     }
     .snippet {
         font-size: 0.95em;
@@ -38,37 +46,13 @@ st.markdown("""
         line-height: 1.5;
     }
     .highlight {
-        background-color: #fff9c4;
+        background-color: #fff9c4; /* Soft Yellow */
         font-weight: bold;
         padding: 0 2px;
         border-radius: 2px;
     }
     </style>
 """, unsafe_allow_html=True)
-
-# --- 🧠 THE "BRAIN" (Stemmer) ---
-def simple_ukrainian_stem(text):
-    """
-    Crude but fast stemmer. Removes common endings so 'ампутація' matches 'ампутацією'.
-    """
-    text = text.lower()
-    # List of common endings sorted by length (longest first)
-    endings = [
-        'ому', 'ого', 'ою', 'ею', 'єю', 'им', 'ім', 'ів', 'їв', 'ям', 'ями', 'ами', 'ими', 
-        'а', 'я', 'у', 'ю', 'і', 'и', 'е', 'є' 
-    ]
-    words = text.split()
-    stemmed_words = []
-    
-    for word in words:
-        if len(word) > 3: # Only stem long words
-            for ending in endings:
-                if word.endswith(ending):
-                    word = word[:-len(ending)]
-                    break
-        stemmed_words.append(word)
-        
-    return stemmed_words
 
 # --- LOAD DATA ---
 @st.cache_resource
@@ -78,6 +62,7 @@ def load_engine():
         "civil_procedure_code_parsed.json", 
         "family_code_parsed.json",
         "mobilization_parsed.json",
+        "intellectual_property_parsed.json",
         "medical_parsed.json"
     ]
     all_articles = []
@@ -86,11 +71,11 @@ def load_engine():
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                # Assign Tags
                 if "civil_code" in filepath: tag = "ЦКУ • Цивільний кодекс"
                 elif "procedure" in filepath: tag = "ЦПК • Цивільний процес"
                 elif "family" in filepath: tag = "СКУ • Сімейний кодекс"
                 elif "mobilization" in filepath: tag = "ЗУ • Мобілізація"
+                elif "intelectual_property" in filepath: tag = "ЗУ • Інтелектуальна власність"
                 elif "medical" in filepath: tag = "🏥 МСЕК • Інвалідність"
                 else: tag = "Закон"
                 
@@ -100,12 +85,11 @@ def load_engine():
         except FileNotFoundError:
             continue
             
-    # Tokenize using the Stemmer (The "Root" Search)
+    # Tokenize
     corpus_tokens = []
     for doc in all_articles:
-        # We process the text to remove punctuation and then stem it
-        clean_text = doc['text'].translate(str.maketrans(string.punctuation, ' '*len(string.punctuation)))
-        corpus_tokens.append(simple_ukrainian_stem(clean_text))
+        text = doc['text'].lower().translate(str.maketrans(string.punctuation, ' '*len(string.punctuation)))
+        corpus_tokens.append(text.split())
         
     bm25 = BM25Okapi(corpus_tokens)
     return bm25, all_articles
@@ -119,35 +103,33 @@ except Exception as e:
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("🇺🇦 Legal Assistant")
-    st.caption("Mode: Intelligent Search")
-    num_results = st.slider("Results", 1, 10, 5)
+    st.info(f"📚 Indexed: **{len(articles)} articles**")
+    st.caption("Sources: Rada.gov.ua")
+    num_results = st.slider("Results", 1, 10, 6)
 
 # --- MAIN UI ---
 st.title("Швидкий пошук")
-selected_chip = st.pills("Приклади:", ["Розірвання шлюбу", "Спадщина", "Позовна давність", "Нирки"], selection_mode="single")
+
+# Chips
+selected_chip = st.pills("Приклади:", ["Розірвання шлюбу", "Спадщина", "Позовна давність", "Відстрочка"], selection_mode="single")
 
 if selected_chip:
     user_query = st.text_input("Пошук:", value=selected_chip)
 else:
     user_query = st.text_input("Пошук:", "")
 
-# Highlight Helper (Visual only)
+# Highlight Helper
 def highlight_text(text, query):
     if not query: return text
     words = query.lower().split()
     for w in words:
         if len(w) > 2:
-            # We use a loose match for highlighting too
-            stem = w[:-1] if len(w) > 4 else w 
-            pattern = re.compile(f"({re.escape(stem)}[а-яіїє]*)", re.IGNORECASE)
+            pattern = re.compile(f"({re.escape(w)})", re.IGNORECASE)
             text = pattern.sub(r'<span class="highlight">\1</span>', text)
     return text
 
 if user_query:
-    # 1. Stem the query (Apply the same logic as the database)
-    clean_query = user_query.translate(str.maketrans(string.punctuation, ' '*len(string.punctuation)))
-    query_tokens = simple_ukrainian_stem(clean_query)
-    
+    query_tokens = user_query.lower().translate(str.maketrans(string.punctuation, ' '*len(string.punctuation))).split()
     scores = bm25.get_scores(query_tokens)
     top_indexes = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:num_results]
     
@@ -160,24 +142,18 @@ if user_query:
             found = True
             art = articles[i]
             
-            # 2. Logic for Display Text
+            # Prepare Snippet (First 350 chars is usually enough for context)
             safe_text = art['text'].replace("<", "&lt;").replace(">", "&gt;")
-            
-            # FIX: If it is a MEDICAL record, show everything (Don't cut it off)
-            if "МСЕК" in art.get('source_tag', ''):
-                preview_text = safe_text # Full text
-            else:
-                # For long laws, keep the snippet logic
-                preview_text = safe_text[:350].strip() + "..." if len(safe_text) > 350 else safe_text
-                
+            preview_text = safe_text[:350].strip() + "..."
             highlighted_preview = highlight_text(preview_text, user_query)
             
-            # 3. Render
+            # RENDER CARD
+            # The Title is now the Link. This is standard UX.
             st.markdown(f"""
             <div class="result-card">
                 <div class="meta-row">{art.get('source_tag')}</div>
                 <a href="{art.get('url')}" target="_blank" class="article-title">
-                    {art.get('article')}. {art.get('title')}
+                    Стаття {art.get('article')}. {art.get('title')}
                 </a>
                 <div class="snippet">
                     {highlighted_preview}
