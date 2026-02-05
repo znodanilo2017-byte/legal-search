@@ -3,7 +3,7 @@ import json
 import string
 import re
 from rank_bm25 import BM25Okapi
-import logging
+import datetime
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Legal Assistant", page_icon="🇺🇦", layout="centered")
@@ -41,7 +41,31 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 🧠 THE "BRAIN" (Stemmer) ---
+# --- 🧠 GLOBAL LOGGER (The Magic Trick) ---
+@st.cache_resource
+def get_global_logs():
+    """Returns a list that persists across ALL users."""
+    return []
+
+def log_search(query, results_count):
+    if query == "admin_secret": return # Don't log the admin password
+    
+    logs = get_global_logs()
+    
+    # Add new log to the TOP of the list
+    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+    entry = {
+        "time": timestamp,
+        "query": query,
+        "results": results_count
+    }
+    logs.insert(0, entry) 
+    
+    # Keep only last 100 searches to save memory
+    if len(logs) > 100:
+        logs.pop()
+
+# --- 🧠 THE STEMMER ---
 def simple_ukrainian_stem(text):
     """
     Crude but fast stemmer. Removes common endings so 'ампутація' matches 'ампутацією'.
@@ -56,7 +80,7 @@ def simple_ukrainian_stem(text):
     stemmed_words = []
     
     for word in words:
-        if len(word) > 3: # Keep >3 to handle short words like 'суд'
+        if len(word) > 3: 
             for ending in endings:
                 if word.endswith(ending):
                     word = word[:-len(ending)]
@@ -126,7 +150,7 @@ if selected_chip:
 else:
     user_query = st.text_input("Пошук:", "")
 
-# --- 🔍 HIGHLIGHT LOGIC (Fixed for Roman Numerals & Gold Color) ---
+# --- HIGHLIGHT LOGIC (Gold) ---
 def highlight_text(text, query):
     if not query: return text
     words = query.split()
@@ -150,7 +174,18 @@ def highlight_text(text, query):
 
 # --- EXECUTE SEARCH ---
 if user_query:
-    # 1. Stem the query
+    
+    # 🕵️‍♂️ ADMIN TRAP DOOR 🕵️‍♂️
+    if user_query == "admin_secret":
+        st.write("### 🕵️‍♂️ User Activity Log")
+        logs = get_global_logs()
+        if logs:
+            st.table(logs)
+        else:
+            st.info("No searches recorded yet since last reboot.")
+        st.stop() # Stop here, don't search for laws
+    
+    # Normal Search Logic
     clean_query = user_query.translate(str.maketrans(string.punctuation, ' '*len(string.punctuation)))
     query_tokens = simple_ukrainian_stem(clean_query)
     
@@ -158,12 +193,9 @@ if user_query:
     scores = bm25.get_scores(query_tokens)
     top_indexes = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:num_results]
     
-    # 3. LOGGING (Now it is safe)
-    logging.info(json.dumps({
-        "event": "search",
-        "query": user_query,
-        "results": len([i for i in top_indexes if scores[i] > 0])
-    }, ensure_ascii=False))
+    # LOG IT (Global)
+    results_count = len([i for i in top_indexes if scores[i] > 0])
+    log_search(user_query, results_count)
     
     st.markdown("### Результати")
     
