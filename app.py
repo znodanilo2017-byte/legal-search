@@ -3,6 +3,7 @@ import json
 import string
 import re
 from rank_bm25 import BM25Okapi
+import logging
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Legal Assistant", page_icon="🇺🇦", layout="centered")
@@ -37,12 +38,6 @@ st.markdown("""
         color: #3c4043;
         line-height: 1.5;
     }
-    .highlight {
-        background-color: #fff9c4;
-        font-weight: bold;
-        padding: 0 2px;
-        border-radius: 2px;
-    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -52,7 +47,7 @@ def simple_ukrainian_stem(text):
     Crude but fast stemmer. Removes common endings so 'ампутація' matches 'ампутацією'.
     """
     text = text.lower()
-    # List of common endings sorted by length (longest first)
+    # List of common endings sorted by length
     endings = [
         'ому', 'ого', 'ою', 'ею', 'єю', 'им', 'ім', 'ів', 'їв', 'ям', 'ями', 'ами', 'ими', 
         'а', 'я', 'у', 'ю', 'і', 'и', 'е', 'є' 
@@ -61,7 +56,7 @@ def simple_ukrainian_stem(text):
     stemmed_words = []
     
     for word in words:
-        if len(word) > 3: # Only stem long words
+        if len(word) > 3: # Keep >3 to handle short words like 'суд'
             for ending in endings:
                 if word.endswith(ending):
                     word = word[:-len(ending)]
@@ -100,7 +95,7 @@ def load_engine():
         except FileNotFoundError:
             continue
             
-    # Tokenize using the Stemmer (The "Root" Search)
+    # Tokenize using the Stemmer
     corpus_tokens = []
     for doc in all_articles:
         # We process the text to remove punctuation and then stem it
@@ -120,7 +115,7 @@ except Exception as e:
 with st.sidebar:
     st.header("🇺🇦 Legal Assistant")
     st.caption("Mode: Intelligent Search")
-    num_results = st.slider("Results", 1, 10, 5)
+    num_results = st.slider("Results", 1, 10, 8)
 
 # --- MAIN UI ---
 st.title("Швидкий пошук")
@@ -131,25 +126,44 @@ if selected_chip:
 else:
     user_query = st.text_input("Пошук:", "")
 
-# Highlight Helper (Visual only)
+# --- 🔍 HIGHLIGHT LOGIC (Fixed for Roman Numerals & Gold Color) ---
 def highlight_text(text, query):
     if not query: return text
-    words = query.lower().split()
+    words = query.split()
     for w in words:
-        if len(w) > 2:
-            # We use a loose match for highlighting too
-            stem = w[:-1] if len(w) > 4 else w 
-            pattern = re.compile(f"({re.escape(stem)}[а-яіїє]*)", re.IGNORECASE)
-            text = pattern.sub(r'<span class="highlight">\1</span>', text)
+        # Check if it looks like a Roman numeral (I, II, III, IV, V, X)
+        # We include Ukrainian 'І' (Cyrillic) and English 'I' (Latin)
+        is_roman = all(c in "IiVvXxlІі" for c in w)
+        
+        # Skip short words unless they are Roman numerals
+        if len(w) < 3 and not is_roman:
+            continue
+            
+        # Simple stemming for the highlight pattern
+        stem = w[:-1] if len(w) > 4 else w
+        
+        # Regex to catch variations + Gold Background + Bold
+        pattern = re.compile(f"({re.escape(stem)}[а-яіїєa-z]*)", re.IGNORECASE)
+        text = pattern.sub(r'<span style="background-color: #ffedb1; font-weight: bold; padding: 2px; border-radius: 3px;">\1</span>', text)
+        
     return text
 
+# --- EXECUTE SEARCH ---
 if user_query:
-    # 1. Stem the query (Apply the same logic as the database)
+    # 1. Stem the query
     clean_query = user_query.translate(str.maketrans(string.punctuation, ' '*len(string.punctuation)))
     query_tokens = simple_ukrainian_stem(clean_query)
     
+    # 2. CALCULATE SCORES (This must happen BEFORE logging)
     scores = bm25.get_scores(query_tokens)
     top_indexes = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:num_results]
+    
+    # 3. LOGGING (Now it is safe)
+    logging.info(json.dumps({
+        "event": "search",
+        "query": user_query,
+        "results": len([i for i in top_indexes if scores[i] > 0])
+    }, ensure_ascii=False))
     
     st.markdown("### Результати")
     
@@ -160,19 +174,18 @@ if user_query:
             found = True
             art = articles[i]
             
-            # 2. Logic for Display Text
+            # Logic for Display Text
             safe_text = art['text'].replace("<", "&lt;").replace(">", "&gt;")
             
-            # FIX: If it is a MEDICAL record, show everything (Don't cut it off)
+            # FIX: Show full text for Medical (MSEC) records
             if "МСЕК" in art.get('source_tag', ''):
-                preview_text = safe_text # Full text
+                preview_text = safe_text 
             else:
-                # For long laws, keep the snippet logic
                 preview_text = safe_text[:350].strip() + "..." if len(safe_text) > 350 else safe_text
                 
             highlighted_preview = highlight_text(preview_text, user_query)
             
-            # 3. Render
+            # Render Card
             st.markdown(f"""
             <div class="result-card">
                 <div class="meta-row">{art.get('source_tag')}</div>
@@ -192,3 +205,12 @@ if user_query:
             
     if not found:
         st.info("Нічого не знайдено.")
+
+# --- FOOTER ---
+st.divider()
+st.caption("""
+    ⚠️ **Disclaimer:** Цей інструмент є довідковим. 
+    Інформація береться з відкритих джерел (zakon.rada.gov.ua) автоматично. 
+    Розробник не несе відповідальності за юридичні наслідки використання отриманої інформації. 
+    Завжди перевіряйте першоджерело за посиланням.
+""")
